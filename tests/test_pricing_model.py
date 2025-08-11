@@ -113,8 +113,8 @@ def test_goalkeeper_alternate_weights():
     field_player = gk_player.copy()
     field_player["goalkeeping"] = 1
 
-    gk_price = pricing.predict_price_from_comparables(gk_player, comps)
-    field_price = pricing.predict_price_from_comparables(field_player, comps)
+    gk_price = pricing.predict_price_from_comparables(gk_player, comps, min_comps=1)
+    field_price = pricing.predict_price_from_comparables(field_player, comps, min_comps=1)
 
     assert gk_price["price_pred"] < field_price["price_pred"]
     assert gk_price["price_pred"] < 1_500_000
