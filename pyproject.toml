@@ -1,0 +1,17 @@
+[project]
+name = "ht-trader-pro"
+version = "0.5.0"
+description = "Read-only analytics for Hattrick (CHPP + HO!)"
+authors = [{name="Your Name"}]
+requires-python = ">=3.10"
+dependencies = [
+  "streamlit",
+  "pandas",
+  "numpy",
+  "python-dateutil",
+  "pychpp"
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["app"]
