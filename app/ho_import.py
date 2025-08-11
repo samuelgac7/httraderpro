@@ -59,6 +59,8 @@ def parse_ho_csv(text:str):
     sco_c = pick("Scoring","Anotación","Anotacion")
     win_c = pick("Winger","Extremo")
     sta_c = pick("Stamina","Resistencia")
+    gk_c = pick("Goalkeeping","Goalkeeper","Portería","Porteria","Portero")
+    sp_c = pick("SetPieces","Set Pieces","Balón Parado","Balon Parado","Balón parado","Balon parado")
 
     out = []
     for _, r in df.iterrows():
@@ -80,6 +82,8 @@ def parse_ho_csv(text:str):
             "Scoring": _to_int(r.get(sco_c,0)),
             "Winger": _to_int(r.get(win_c,0)),
             "Stamina": _to_int(r.get(sta_c,0)),
+            "Goalkeeping": _to_int(r.get(gk_c,0)),
+            "SetPieces": _to_int(r.get(sp_c,0)),
         })
     return pd.DataFrame(out)
 
@@ -135,4 +139,6 @@ def parse_ho_paste(text:str):
         "Scoring": get_num("anotación", get_num("anotacion", get_num("scoring",0))),
         "Winger": get_num("extremo", get_num("winger",0)),
         "Stamina": get_num("resistencia", get_num("stamina",0)),
+        "Goalkeeping": get_num("portero", get_num("porteria", get_num("goalkeeper", get_num("goalkeeping",0)))),
+        "SetPieces": get_num("balón", get_num("balon", get_num("set", 0))),
     }

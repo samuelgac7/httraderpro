@@ -14,6 +14,8 @@ def extract_features_from_player(player):
         "defending": int(getattr(player, 'defending', 0)),
         "scoring": int(getattr(player, 'scoring', 0)),
         "winger": int(getattr(player, 'winger', 0)),
+        "goalkeeping": int(getattr(player, 'goalkeeping', 0)),
+        "set_pieces": int(getattr(player, 'set_pieces', 0)),
         "stamina": int(getattr(player, 'stamina', 0)),
         "tsi": int(getattr(player, 'tsi', 0)),
         "form": int(getattr(player, 'form', 0)),
