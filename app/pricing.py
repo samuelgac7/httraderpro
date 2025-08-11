@@ -115,10 +115,64 @@ def _get_gk_model():
     return _GK_MODEL
 
 
+def _filter_comparables(
+    player: dict,
+    comp_df: pd.DataFrame,
+    *,
+    age_range: float = 1.0,
+    skill_delta: int = 1,
+) -> pd.DataFrame:
+    """Filter comparables by price outliers, age and skill levels.
+
+    Prices outside 1.5 times the interquartile range are discarded. Only
+    players within ``age_range`` years of the target player's age and whose
+    core skills differ by at most ``skill_delta`` levels are kept.
+    """
+
+    df = comp_df.copy()
+
+    if not df.empty and "price" in df.columns:
+        q1 = df["price"].quantile(0.25)
+        q3 = df["price"].quantile(0.75)
+        iqr = q3 - q1
+        low = q1 - 1.5 * iqr
+        high = q3 + 1.5 * iqr
+        df = df[(df["price"] >= low) & (df["price"] <= high)]
+
+    player_age = player.get("age_years")
+    if player_age is None and (age_days := player.get("age_days")) is not None:
+        player_age = age_days / 365
+    if player_age is not None:
+        if "age_years" in df.columns:
+            comp_age = df["age_years"]
+        elif "age_days" in df.columns:
+            comp_age = df["age_days"] / 365
+        else:
+            comp_age = None
+        if comp_age is not None:
+            df = df[(comp_age >= player_age - age_range) & (comp_age <= player_age + age_range)]
+
+    skill_cols = [
+        "playmaking",
+        "passing",
+        "defending",
+        "scoring",
+        "winger",
+        "goalkeeping",
+    ]
+    for col in skill_cols:
+        p_val = player.get(col)
+        if p_val is not None and col in df.columns:
+            df = df[(df[col] >= p_val - skill_delta) & (df[col] <= p_val + skill_delta)]
+
+    return df
+
+
 def predict_price_from_comparables(
     player,
     comp_df: pd.DataFrame | None,
     *,
+    min_comps: int = 3,
     weights: dict[str, float] | None = None,
     scales: dict[str, float] | None = None,
 ):
@@ -126,43 +180,48 @@ def predict_price_from_comparables(
 
     If a DataFrame of comparables is provided, their prices are weighted by
     the inverse of the scaled, weighted distance to the target player.  The
-    weighting parameters can be overridden via the ``weights`` and ``scales``
-    arguments or by setting the ``PRICING_WEIGHTS`` and ``PRICING_SCALES``
-    environment variables with JSON mappings.
+    comparable DataFrame is first filtered for outlier prices and players with
+    similar age and skill levels.  A minimum of ``min_comps`` valid comparables
+    is required; otherwise the machine learning model is used.  The weighting
+    parameters can be overridden via the ``weights`` and ``scales`` arguments or
+    by setting the ``PRICING_WEIGHTS`` and ``PRICING_SCALES`` environment
+    variables with JSON mappings.
     """
 
     is_gk = player.get("goalkeeping", 0) >= 7
 
     if comp_df is not None and not comp_df.empty:
-        default_w = GOALKEEPER_WEIGHTS if is_gk else DEFAULT_WEIGHTS
-        default_s = GOALKEEPER_SCALES if is_gk else DEFAULT_SCALES
-        weights = weights or {
-            **default_w,
-            **_load_config("PRICING_WEIGHTS"),
-        }
-        scales = scales or {
-            **default_s,
-            **_load_config("PRICING_SCALES"),
-        }
+        comp_df = _filter_comparables(player, comp_df)
+        if len(comp_df) >= min_comps:
+            default_w = GOALKEEPER_WEIGHTS if is_gk else DEFAULT_WEIGHTS
+            default_s = GOALKEEPER_SCALES if is_gk else DEFAULT_SCALES
+            weights = weights or {
+                **default_w,
+                **_load_config("PRICING_WEIGHTS"),
+            }
+            scales = scales or {
+                **default_s,
+                **_load_config("PRICING_SCALES"),
+            }
 
-        df = comp_df.copy()
-        df["distance"] = df.apply(lambda r: _distance(player, r, weights, scales), axis=1)
-        df["w"] = 1 / (1 + df["distance"])
+            df = comp_df.copy()
+            df["distance"] = df.apply(lambda r: _distance(player, r, weights, scales), axis=1)
+            df["w"] = 1 / (1 + df["distance"])
 
-        price_pred = float(np.average(df["price"], weights=df["w"]))
-        p25 = float(np.percentile(df["price"], 25))
-        p75 = float(np.percentile(df["price"], 75))
-        p05 = float(np.percentile(df["price"], 5))
-        p95 = float(np.percentile(df["price"], 95))
-        confidence = float(df["w"].sum() / (df["w"].sum() + len(df)))
-        return {
-            "price_pred": price_pred,
-            "p25": p25,
-            "p75": p75,
-            "p05": p05,
-            "p95": p95,
-            "confidence": confidence,
-        }
+            price_pred = float(np.average(df["price"], weights=df["w"]))
+            p25 = float(np.percentile(df["price"], 25))
+            p75 = float(np.percentile(df["price"], 75))
+            p05 = float(np.percentile(df["price"], 5))
+            p95 = float(np.percentile(df["price"], 95))
+            confidence = float(df["w"].sum() / (df["w"].sum() + len(df)))
+            return {
+                "price_pred": price_pred,
+                "p25": p25,
+                "p75": p75,
+                "p05": p05,
+                "p95": p95,
+                "confidence": confidence,
+            }
 
     # Fall back to machine learning model when no comparables are provided.
     model = _get_gk_model() if is_gk else _get_model()
