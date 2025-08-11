@@ -1,9 +1,82 @@
+import json
+import os
+
 import numpy as np
 import pandas as pd
 
 import pricing_model
 
 _MODEL = None
+
+
+# Scaling factors for each attribute used when comparing two players.
+# The values roughly correspond to either an expected range or a
+# standard deviation so that differences are normalised before
+# weighting.  They can be overridden via environment variables or
+# function arguments.
+DEFAULT_SCALES = {
+    "playmaking": 5,
+    "passing": 5,
+    "defending": 5,
+    "scoring": 5,
+    "winger": 5,
+    "form": 5,
+    "tsi": 100_000,
+    "age_days": 1_825,  # ~5 years
+    "specialty_index": 1,
+}
+
+DEFAULT_WEIGHTS = {k: 1.0 for k in DEFAULT_SCALES.keys()}
+
+
+def _load_config(env_var: str) -> dict[str, float]:
+    """Load a JSON encoded mapping from an environment variable."""
+
+    data = os.getenv(env_var)
+    if not data:
+        return {}
+    try:
+        loaded = json.loads(data)
+        return {k: float(v) for k, v in loaded.items()}
+    except Exception:
+        return {}
+
+
+def attribute_contributions(
+    player: dict,
+    comparable: dict,
+    weights: dict[str, float] | None = None,
+    scales: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Return per-attribute contributions to the comparable score."""
+
+    weights = weights or {
+        **DEFAULT_WEIGHTS,
+        **_load_config("PRICING_WEIGHTS"),
+    }
+    scales = scales or {
+        **DEFAULT_SCALES,
+        **_load_config("PRICING_SCALES"),
+    }
+
+    contribs: dict[str, float] = {}
+    for attr, weight in weights.items():
+        scale = scales.get(attr, 1.0)
+        diff = (player.get(attr, 0) - comparable.get(attr, 0)) / scale
+        contribs[attr] = abs(diff) * weight
+    return contribs
+
+
+def _distance(
+    player: dict,
+    comparable: dict,
+    weights: dict[str, float] | None = None,
+    scales: dict[str, float] | None = None,
+) -> float:
+    """Weighted distance between player and comparable."""
+
+    contribs = attribute_contributions(player, comparable, weights, scales)
+    return float(sum(contribs.values()))
 
 
 def _age_price_curve(age_years: float) -> float:
@@ -29,12 +102,52 @@ def _get_model():
     return _MODEL
 
 
-def predict_price_from_comparables(player, comp_df: pd.DataFrame | None):
-    """Predict price using the trained model.
+def predict_price_from_comparables(
+    player,
+    comp_df: pd.DataFrame | None,
+    *,
+    weights: dict[str, float] | None = None,
+    scales: dict[str, float] | None = None,
+):
+    """Predict price using either comparables or the trained model.
 
-    The previous comparable-based logic has been replaced by a machine
-    learning model. Any provided comparables are ignored.
+    If a DataFrame of comparables is provided, their prices are weighted by
+    the inverse of the scaled, weighted distance to the target player.  The
+    weighting parameters can be overridden via the ``weights`` and ``scales``
+    arguments or by setting the ``PRICING_WEIGHTS`` and ``PRICING_SCALES``
+    environment variables with JSON mappings.
     """
+
+    if comp_df is not None and not comp_df.empty:
+        weights = weights or {
+            **DEFAULT_WEIGHTS,
+            **_load_config("PRICING_WEIGHTS"),
+        }
+        scales = scales or {
+            **DEFAULT_SCALES,
+            **_load_config("PRICING_SCALES"),
+        }
+
+        df = comp_df.copy()
+        df["distance"] = df.apply(lambda r: _distance(player, r, weights, scales), axis=1)
+        df["w"] = 1 / (1 + df["distance"])
+
+        price_pred = float(np.average(df["price"], weights=df["w"]))
+        p25 = float(np.percentile(df["price"], 25))
+        p75 = float(np.percentile(df["price"], 75))
+        p05 = float(np.percentile(df["price"], 5))
+        p95 = float(np.percentile(df["price"], 95))
+        confidence = float(df["w"].sum() / (df["w"].sum() + len(df)))
+        return {
+            "price_pred": price_pred,
+            "p25": p25,
+            "p75": p75,
+            "p05": p05,
+            "p95": p95,
+            "confidence": confidence,
+        }
+
+    # Fall back to machine learning model when no comparables are provided.
     model = _get_model()
     price_pred = pricing_model.predict(player, model)
 
