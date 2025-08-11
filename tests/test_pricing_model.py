@@ -21,3 +21,20 @@ def test_playmaking_increases_price():
     out_base = pricing.predict_price_from_comparables(base, None)
     out_better = pricing.predict_price_from_comparables(better, None)
     assert out_better["price_pred"] > out_base["price_pred"]
+
+
+def test_age_extremes_reduce_price():
+    base = {"playmaking": 6, "passing": 3, "defending": 3, "scoring": 3,
+            "winger": 2, "form": 5, "tsi": 4000, "age_days": 9000,
+            "specialty_index": 0}
+    young = base.copy()
+    old = base.copy()
+    young["age_days"] = 4000  # very young
+    old["age_days"] = 15000   # very veteran
+
+    base_out = pricing.predict_price_from_comparables(base, None)
+    young_out = pricing.predict_price_from_comparables(young, None)
+    old_out = pricing.predict_price_from_comparables(old, None)
+
+    assert young_out["price_pred"] < base_out["price_pred"]
+    assert old_out["price_pred"] < base_out["price_pred"]
