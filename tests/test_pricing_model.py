@@ -38,3 +38,26 @@ def test_age_extremes_reduce_price():
 
     assert young_out["price_pred"] < base_out["price_pred"]
     assert old_out["price_pred"] < base_out["price_pred"]
+
+
+def test_no_single_attribute_dominates():
+    player = {
+        "playmaking": 10,
+        "passing": 10,
+        "defending": 10,
+        "scoring": 10,
+        "winger": 10,
+        "form": 5,
+        "tsi": 50_000,
+        "age_days": 8_000,
+        "specialty_index": 0,
+    }
+    comparable = player.copy()
+    comparable["playmaking"] = 15
+    comparable["tsi"] = 150_000
+    comparable["age_days"] = 10_000
+
+    contribs = pricing.attribute_contributions(player, comparable)
+    total = sum(contribs.values())
+    assert total > 0
+    assert all(c <= total * 0.5 for c in contribs.values())
