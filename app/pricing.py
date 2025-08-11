@@ -7,6 +7,7 @@ import pandas as pd
 import pricing_model
 
 _MODEL = None
+_GK_MODEL = None
 
 
 # Scaling factors for each attribute used when comparing two players.
@@ -24,9 +25,14 @@ DEFAULT_SCALES = {
     "tsi": 100_000,
     "age_days": 1_825,  # ~5 years
     "specialty_index": 1,
+    "goalkeeping": 5,
+    "set_pieces": 5,
 }
 
 DEFAULT_WEIGHTS = {k: 1.0 for k in DEFAULT_SCALES.keys()}
+
+GOALKEEPER_WEIGHTS = {**DEFAULT_WEIGHTS, "goalkeeping": 3.0, "scoring": 0.5, "winger": 0.5, "playmaking": 0.5, "passing": 0.5}
+GOALKEEPER_SCALES = {**DEFAULT_SCALES}
 
 
 def _load_config(env_var: str) -> dict[str, float]:
@@ -102,6 +108,13 @@ def _get_model():
     return _MODEL
 
 
+def _get_gk_model():
+    global _GK_MODEL
+    if _GK_MODEL is None:
+        _GK_MODEL = pricing_model.load_model_gk()
+    return _GK_MODEL
+
+
 def predict_price_from_comparables(
     player,
     comp_df: pd.DataFrame | None,
@@ -118,13 +131,17 @@ def predict_price_from_comparables(
     environment variables with JSON mappings.
     """
 
+    is_gk = player.get("goalkeeping", 0) >= 7
+
     if comp_df is not None and not comp_df.empty:
+        default_w = GOALKEEPER_WEIGHTS if is_gk else DEFAULT_WEIGHTS
+        default_s = GOALKEEPER_SCALES if is_gk else DEFAULT_SCALES
         weights = weights or {
-            **DEFAULT_WEIGHTS,
+            **default_w,
             **_load_config("PRICING_WEIGHTS"),
         }
         scales = scales or {
-            **DEFAULT_SCALES,
+            **default_s,
             **_load_config("PRICING_SCALES"),
         }
 
@@ -148,8 +165,8 @@ def predict_price_from_comparables(
         }
 
     # Fall back to machine learning model when no comparables are provided.
-    model = _get_model()
-    price_pred = pricing_model.predict(player, model)
+    model = _get_gk_model() if is_gk else _get_model()
+    price_pred = pricing_model.predict_gk(player, model) if is_gk else pricing_model.predict(player, model)
 
     age_days = player.get("age_days")
     age_years = player.get("age_years")
